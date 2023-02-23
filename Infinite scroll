@@ -1,0 +1,1041 @@
+import { React, useState, useEffect, useContext, useHistory } from "react";
+import { Card, Space, Row, Table, Col, Tabs, Tag } from "antd";
+import OpportunityDashboardService from "../../../Services/Dashboards/opportunitydashboard.service";
+import {
+  EXCEL_REPORTS_ENUM,
+  NOTIFICATION_TITLE,
+} from "../../../Common/utility/globalenums";
+import { ChildLoading } from "../../Common/Loader/Loading";
+import { AuthContext } from "../../../AppState";
+import Button from "../../Common/Button/buttons.component";
+import ExportExcel from "../../Common/GridAttributeHocUI/exportexcel.component";
+import { statusCode } from "../../../Shared/Common";
+import ENUM_HTTPSTATUSCODE from "../../../Common/utility/httpstatuscode.enum";
+import CoreReportService from "../../../Services/Reports/Core/corereport.service";
+import LineBarChart from "../../Common/Charts/LineBarChart";
+import SourceGridChart from "./OpportunitySource/sourceGridChart";
+import RecaptureGridChart from "./TopHCC/recaptureChart";
+import ConfidenceGridChart from "./TopHCC/confidenceChart";
+import AddFilterButton from "../../Common/GridAttributeHocUI/AddFilter/addfilter.component";
+import GridAttributeHOC from "../../Common/HOC/gridattributeHOC.component";
+import Paths from "../../../Shared/Path";
+import MemberDrawer from "../../Member/MemberOverview/member.drawer";
+import ExportToPDF from "../../Common/DownloadPDF/ExportToPDF";
+import ManageAccessService from "../../../Services/ReportAndDashboard/manageaccess.service";
+
+function OpportunityStatus(props) {
+  const {
+    setAllFiltersAndDownloadxlsToHoc,
+    _filterData,
+    setColumnsToHOC,
+    setFiltersForExcel,
+    setVisibleDownload,
+  } = props;
+  const { memberIDState, setMemberIDState, clearMemberIDState } =
+    useContext(AuthContext);
+  let memberID = memberIDState();
+  const [recaptureRateLoading, setRecaptureRateLoading] = useState(false);
+  const [membersLoading, setMembersLoading] = useState(false);
+  const [bySourceLoading, setBySourceLoading] = useState(false);
+  const [byMemberLoading, setByMemberLoading] = useState(false);
+  const [topHccLoading, setTopHccLoading] = useState(false);
+  const currentYear = new Date().getFullYear().toString();
+  const [coreReportService] = useState(() => new CoreReportService());
+  const [manageAccessService] = useState(() => new ManageAccessService());
+  const [opportunityDashboardService] = useState(
+    () => new OpportunityDashboardService()
+  );
+  const [tabState, setTabState] = useState({
+    tabKey: "1",
+  });
+  const [showReportButton, setShowReportButton] = useState(false);
+  const [updateByMember, setUpdateByMember] = useState(null);
+  const [opportunityStatus, setOpportunityStatus] = useState(null);
+  const [source, setSource] = useState(null);
+  const [sourceHcc, setSourceHCC] = useState(null);
+  const [titleCoverage, setTitleCoverage] = useState("");
+  const [listState, setListState] = useState({
+    hccDataList: [],
+    sourceDataList: [],
+    memberDataList: [],
+  });
+  const [visible, setVisible] = useState(false);
+  const [recaptureWidgetData, setRecaptureWidgetData] = useState({
+    chronicRecaptureRate: 0,
+    nonRecaptureRate: 0,
+    preYearRecaptureRate: 0,
+  });
+  const [memberWidgetData, setMemberWidgetData] = useState({
+    members: 0,
+    membersWithOpportunity: 0,
+    membersWithoutOpportunity: 0,
+  });
+
+  const tabItems = [
+    {
+      key: "1",
+      label: `Prevalence`,
+    },
+    {
+      key: "2",
+      label: `Weighted Opportunity Impact`,
+    },
+    {
+      key: "3",
+      label: `Highest Coefficient`,
+    },
+    {
+      key: "4",
+      label: "All HCCs",
+    },
+  ];
+
+  let addfilterOptionData = [
+    {
+      key: "Year",
+      filterName: "Service Year",
+      type: "SingleSelectionDropdown",
+      defaultValue: currentYear,
+      defaultDisplayValue: currentYear,
+      ServiceMethod: "getDOSYears",
+      ServiceName: coreReportService,
+      title: "DOSYear",
+      value: "DOSYear",
+      isRequired: true,
+    },
+    {
+      key: "LOB",
+      filterName: "LOB",
+      type: "SingleSelectionDropdown",
+      defaultValue: "34",
+      defaultDisplayValue: "MA",
+      ServiceMethod: "getLOB",
+      ServiceName: coreReportService,
+      cascadeField: ["Year"],
+      title: "LOB",
+      value: "LOBRCVID",
+      isRequired: true,
+    },
+    {
+      key: "CoverageID",
+      filterName: "Coverage",
+      type: "SingleSelectionDropdown",
+      defaultValue: ["470"],
+      defaultDisplayValue: "ALL",
+      ServiceMethod: "getCoverage",
+      ServiceName: coreReportService,
+      cascadeField: ["Year", "LOB"],
+      requestParams: { Year: "DOSYear", LOB: "LOB" },
+      title: "CoverageName",
+      value: "CoverageID",
+      isRequired: true,
+    },
+    {
+      key: "HCC",
+      filterName: "HCC",
+      type: "MultipleSelectionDropdown",
+      defaultValue: ["ALL"],
+      defaultDisplayValue: "ALL",
+      ServiceMethod: "getHCC",
+      ServiceName: coreReportService,
+      cascadeField: ["Year", "LOB", "CoverageID"],
+      requestParams: {
+        Year: "PaymentYear",
+        LOB: "LOBID",
+        CoverageID: "CoverageID",
+      },
+      title: "HCCText",
+      value: "HCCValue",
+      isRequired: true,
+    },
+    {
+      key: "Confidence",
+      filterName: "Confidence",
+      type: "MultipleSelectionDropdown",
+      defaultValue: ["ALL"],
+      defaultDisplayValue: "ALL",
+      ServiceMethod: "getConfidence",
+      ServiceName: coreReportService,
+      title: "ConfidenceLevelName",
+      value: "ConfidenceLevelID",
+      isRequired: true,
+    },
+    {
+      key: "Status",
+      filterName: "Status",
+      type: "MultipleSelectionDropdown",
+      defaultValue: ["ALL"],
+      defaultDisplayValue: "ALL",
+      ServiceMethod: "getOpportunity",
+      ServiceName: coreReportService,
+      title: "OpportunityStatusName",
+      value: "OpportunityStatusID",
+      isRequired: true,
+    },
+  ];
+
+  useEffect(() => {
+    setFilters();
+    clearMemberIDState();
+    setAccesibility();
+  }, []);
+
+  const setAccesibility = () => {
+    manageAccessService
+      .checkReportAccess(Paths.CoreReportOpportunity)
+      .then((response) => {
+        if (statusCode(response, NOTIFICATION_TITLE.OPPORTUNITY_STATUS)) return;
+        if (response.statusCode === ENUM_HTTPSTATUSCODE.OK) {
+          if (response.data === true) {
+            setShowReportButton(true);
+          } else setShowReportButton(false);
+        }
+      });
+  };
+  useEffect(() => {
+    if (_filterData) {
+      setListState((prevState) => ({
+        ...prevState,
+        sourceDataList: [],
+        memberDataList: [],
+      }));
+      setSourceHCC(null);
+      setSource(null);
+      setOpportunityStatus(null);
+      if (parseInt(_filterData.CoverageID) === 470) {
+        setTitleCoverage("MA-C");
+      } else if (parseInt(_filterData.CoverageID) === 471) {
+        setTitleCoverage("MA-D");
+      }
+      const hcc = _filterData.HCC_ValueCount.split("/");
+      const confidence = _filterData.Confidence_ValueCount.split("/");
+      const status = _filterData.Status_ValueCount.split("/");
+      let params = {
+        serviceYear: parseInt(_filterData.Year),
+        lob: parseInt(_filterData.LOB),
+        coverage: parseInt(_filterData.CoverageID),
+        hcc: hcc?.length === 2 && hcc[0] === hcc[1] ? "" : _filterData.HCC,
+        confidence:
+          confidence?.length === 2 && confidence[0] === confidence[1]
+            ? ""
+            : _filterData.Confidence,
+        status:
+          status?.length === 2 && status[0] === status[1]
+            ? ""
+            : _filterData.Status,
+      };
+      let excelParams = {
+        hcc: _filterData.HCC,
+        status: _filterData.Status,
+        sourceCategory: source,
+      };
+      getRecaptureWidgetData(params);
+      getMemberWidgetData(params);
+      getSourceDetails(params);
+      getMemberDetails(params, excelParams);
+    }
+  }, [_filterData]);
+
+  useEffect(() => {
+    if (_filterData) {
+      const hcc = _filterData.HCC_ValueCount.split("/");
+      const confidence = _filterData.Confidence_ValueCount.split("/");
+      const status = _filterData.Status_ValueCount.split("/");
+
+      let params = {
+        serviceYear: parseInt(_filterData.Year),
+        lob: parseInt(_filterData.LOB),
+        coverage: parseInt(_filterData.CoverageID),
+        hcc: hcc?.length === 2 && hcc[0] === hcc[1] ? "" : _filterData.HCC,
+        confidence:
+          confidence?.length === 2 && confidence[0] === confidence[1]
+            ? ""
+            : _filterData.Confidence,
+        status:
+          status?.length === 2 && status[0] === status[1]
+            ? ""
+            : _filterData.Status,
+      };
+
+      setListState((prevState) => ({
+        ...prevState,
+        hccDataList: [],
+      }));
+      if (tabState.tabKey == "1") {
+        getPrevalenceHCC(params);
+      } else if (tabState.tabKey == "2") {
+        getImpactHCC(params);
+      } else if (tabState.tabKey == "3") {
+        getHighestCoeffHCC(params);
+      } else if (tabState.tabKey == "4") {
+        getAllHCC(params);
+      }
+    }
+  }, [tabState.tabKey, _filterData]);
+
+  useEffect(() => {
+    if (_filterData) {
+      const confidence = _filterData.Confidence_ValueCount.split("/");
+      const status = _filterData.Status_ValueCount.split("/");
+      let params = {
+        serviceYear: parseInt(_filterData.Year),
+        lob: parseInt(_filterData.LOB),
+        coverage: parseInt(_filterData.CoverageID),
+        hcc: sourceHcc,
+        confidence:
+          confidence?.length === 2 && confidence[0] === confidence[1]
+            ? ""
+            : _filterData.Confidence,
+        status:
+          status?.length === 2 && status[0] === status[1]
+            ? ""
+            : _filterData.Status,
+      };
+      let excelParams = {
+        hcc:
+          sourceHcc === null
+            ? _filterData.HCC
+            : sourceHcc + "|" + _filterData.CoverageID,
+        status: _filterData.Status,
+        sourceCategory: source,
+      };
+
+      setListState((prevState) => ({
+        ...prevState,
+        sourceDataList: [],
+        memberDataList: [],
+      }));
+      getSourceDetails(params);
+      getMemberDetails(params, excelParams);
+    }
+  }, [sourceHcc]);
+
+  useEffect(() => {
+    if (_filterData) {
+      const confidence = _filterData.Confidence_ValueCount.split("/");
+      const hcc = _filterData.HCC_ValueCount.split("/");
+
+      let params = {
+        serviceYear: parseInt(_filterData.Year),
+        lob: parseInt(_filterData.LOB),
+        coverage: parseInt(_filterData.CoverageID),
+        hcc:
+          sourceHcc === null
+            ? hcc?.length === 2 && hcc[0] === hcc[1]
+              ? ""
+              : _filterData.HCC
+            : sourceHcc,
+        confidence:
+          confidence?.length === 2 && confidence[0] === confidence[1]
+            ? ""
+            : _filterData.Confidence,
+        status: opportunityStatus,
+        sourceCategory: source,
+      };
+      let excelParams = {
+        hcc:
+          sourceHcc === null
+            ? _filterData.HCC
+            : sourceHcc + "|" + _filterData.CoverageID,
+        status: opportunityStatus,
+        sourceCategory: source,
+      };
+
+      setListState((prevState) => ({
+        ...prevState,
+        memberDataList: [],
+      }));
+      getMemberDetails(params, excelParams);
+    }
+  }, [updateByMember]);
+
+  const setFilters = () => {
+    let _columns = getMemberColumns();
+    setColumnsToHOC(_columns);
+
+    let excelParams = {
+      reportID: EXCEL_REPORTS_ENUM.OPPORTUNITY_STATUS_REPORT_ID,
+      layoutID: 0,
+      tabName: EXCEL_REPORTS_ENUM.OPPORTUNITY_STATUS_TAB_NAME,
+    };
+    let notification_Title = NOTIFICATION_TITLE.OPPORTUNITY_STATUS;
+    let internalParam = [];
+    setAllFiltersAndDownloadxlsToHoc(
+      addfilterOptionData,
+      excelParams,
+      notification_Title,
+      internalParam
+    );
+  };
+
+  const tabChangeHanlder = (key) => {
+    setTabState((prevState) => ({
+      ...prevState,
+      tabKey: key,
+    }));
+  };
+
+  const changeStatus = (params) => {
+    setUpdateByMember(params);
+    setOpportunityStatus(params[0]);
+    setSource(params[1]);
+  };
+
+  const getRecaptureWidgetData = (params) => {
+    setRecaptureRateLoading(true);
+    opportunityDashboardService.getRecaptureData(params).then((response) => {
+      setRecaptureRateLoading(false);
+      if (statusCode(response, NOTIFICATION_TITLE.OPPORTUNITY_STATUS)) return;
+      if (response.statusCode === ENUM_HTTPSTATUSCODE.OK)
+        setRecaptureWidgetData((prevState) => ({
+          ...prevState,
+          chronicRecaptureRate: response.data.chronicRecaptureRatePer,
+          nonRecaptureRate: response.data.nonRecaptureRate,
+          preYearRecaptureRate: response.data.preYearRecaptureRate,
+        }));
+    });
+  };
+
+  let recaptureChartProps = {
+    chartPin: recaptureWidgetData.preYearRecaptureRate.toLocaleString("en-US", {
+      maximumFractionDigits: 0,
+    }),
+    chartSeries: [
+      {
+        field: "1",
+        name:
+          recaptureWidgetData.chronicRecaptureRate.toLocaleString("en-US", {
+            maximumFractionDigits: 0,
+          }) + "%",
+        color: "#2f4629",
+        value: recaptureWidgetData.chronicRecaptureRate,
+      },
+      {
+        field: "2",
+        name:
+          recaptureWidgetData.nonRecaptureRate.toLocaleString("en-US", {
+            maximumFractionDigits: 0,
+          }) + "%",
+        color: "#b7b5b5",
+        value: recaptureWidgetData.nonRecaptureRate,
+      },
+    ],
+  };
+
+  const getMemberWidgetData = (params) => {
+    setMembersLoading(true);
+    opportunityDashboardService.getMemberData(params).then((response) => {
+      setMembersLoading(false);
+      if (statusCode(response, NOTIFICATION_TITLE.OPPORTUNITY_STATUS)) return;
+      if (response.statusCode === ENUM_HTTPSTATUSCODE.OK)
+        setMemberWidgetData((prevState) => ({
+          ...prevState,
+          members: response.data.memberTotalCount.toLocaleString("en-US"),
+          membersWithOpportunity: response.data.withOpportunities,
+          membersWithoutOpportunity: response.data.withoutOpportunities,
+        }));
+    });
+  };
+
+  let totalMemberCount =
+    memberWidgetData.membersWithOpportunity +
+    memberWidgetData.membersWithoutOpportunity;
+
+  let memberChartProps = {
+    chartSeries: [
+      {
+        field: "v1",
+        name: memberWidgetData.membersWithOpportunity.toLocaleString("en-US"),
+        color: "#005C53",
+        value:
+          (100 * memberWidgetData.membersWithOpportunity) / totalMemberCount,
+      },
+      {
+        field: "v2",
+        name: memberWidgetData.membersWithoutOpportunity.toLocaleString(
+          "en-US"
+        ),
+        color: "#D6D58E",
+        value:
+          (100 * memberWidgetData.membersWithoutOpportunity) / totalMemberCount,
+      },
+    ],
+  };
+
+  const getPrevalenceHCC = (params) => {
+    setTopHccLoading(true);
+    opportunityDashboardService.getPrevelanceHCC(params).then((response) => {
+      setTopHccLoading(false);
+      if (statusCode(response, NOTIFICATION_TITLE.OPPORTUNITY_STATUS)) return;
+      if (response.statusCode === ENUM_HTTPSTATUSCODE.OK) {
+        setListState((prevState) => ({
+          ...prevState,
+          hccDataList: response.data.opportunityStatus_HCCDetails,
+        }));
+      }
+    });
+  };
+
+  const getImpactHCC = (params) => {
+    setTopHccLoading(true);
+    opportunityDashboardService.getImpactHCC(params).then((response) => {
+      setTopHccLoading(false);
+      if (statusCode(response, NOTIFICATION_TITLE.OPPORTUNITY_STATUS)) return;
+      if (response.statusCode === ENUM_HTTPSTATUSCODE.OK) {
+        setListState((prevState) => ({
+          ...prevState,
+          hccDataList: response.data.opportunityStatus_HCCDetails,
+        }));
+      }
+    });
+  };
+
+  const getHighestCoeffHCC = (params) => {
+    setTopHccLoading(true);
+    opportunityDashboardService.getHighestCoeffHCC(params).then((response) => {
+      setTopHccLoading(false);
+      if (statusCode(response, NOTIFICATION_TITLE.OPPORTUNITY_STATUS)) return;
+      if (response.statusCode === ENUM_HTTPSTATUSCODE.OK) {
+        setListState((prevState) => ({
+          ...prevState,
+          hccDataList: response.data.opportunityStatus_HCCDetails,
+        }));
+      }
+    });
+  };
+
+  const getAllHCC = (params) => {
+    setTopHccLoading(true);
+    opportunityDashboardService.getAllHCC(params).then((response) => {
+      setTopHccLoading(false);
+      if (statusCode(response, NOTIFICATION_TITLE.OPPORTUNITY_STATUS)) return;
+      if (response.statusCode === ENUM_HTTPSTATUSCODE.OK) {
+        setListState((prevState) => ({
+          ...prevState,
+          hccDataList: response.data.opportunityStatus_HCCDetails,
+        }));
+      }
+    });
+  };
+
+  const getColumns = () => {
+    const columns = [
+      {
+        title: "HCC",
+        dataIndex: "hCC",
+        key: "hCC",
+        width: 25,
+        ellipsis: true,
+        showSorterTooltip: false,
+        render: (text, record) => (
+          <Button
+            title={text}
+            type="text"
+            className="p-0"
+            size="small"
+            variant="themelink"
+            onClick={() => {
+              setSource(null);
+              setOpportunityStatus(null);
+              setSourceHCC(text);
+            }}
+          >
+            {text}
+          </Button>
+        ),
+      },
+      {
+        title: "HCC Description",
+        dataIndex: "hCC_Description",
+        key: "hCC_Description",
+        width: 40,
+        ellipsis: true,
+        showSorterTooltip: false,
+      },
+      {
+        title: "Opportunity Closure Rate",
+        dataIndex: "recapture_Rate",
+        key: "recapture_Rate",
+        width: 60,
+        ellipsis: true,
+        showSorterTooltip: false,
+        render: (text, record) => (
+          <div className="px-2">
+            <br />
+            <RecaptureGridChart record={record} />
+          </div>
+        ),
+      },
+      {
+        title: "Coefficient",
+        dataIndex: "coefficient",
+        key: "coefficient",
+        align: "center",
+        width: 30,
+        ellipsis: true,
+        showSorterTooltip: false,
+      },
+      {
+        title: "Open Opportunities",
+        dataIndex: "open_Opportunities",
+        key: "open_Opportunities",
+        align: "center",
+        width: 40,
+        ellipsis: true,
+        showSorterTooltip: false,
+        render: (text, record) => (
+          <>{record.open_Opportunities.toLocaleString("en-US")}</>
+        ),
+      },
+      {
+        title: "Weighted Opportunity Impact",
+        dataIndex: "weighted_Opportunity_Impact",
+        align: "center",
+        width: 60,
+        ellipsis: true,
+        showSorterTooltip: false,
+        render: (text, record) => (
+          <>${record.weighted_Opportunity_Impact.toLocaleString("en-US")}</>
+        ),
+      },
+      {
+        title: "Confidence Level",
+        dataIndex: "confidenceLevel",
+        key: "confidenceLevel",
+        width: 60,
+        ellipsis: true,
+        showSorterTooltip: false,
+        toolTip: true,
+        render: (text, record) => (
+          <>
+            <ConfidenceGridChart record={record} />
+          </>
+        ),
+      },
+    ];
+    return columns;
+  };
+
+  const getSourceDetails = (params) => {
+    setBySourceLoading(true);
+    opportunityDashboardService.getSourceDetails(params).then((response) => {
+      setBySourceLoading(false);
+      if (statusCode(response, NOTIFICATION_TITLE.OPPORTUNITY_STATUS)) return;
+      if (response.statusCode === ENUM_HTTPSTATUSCODE.OK) {
+        setListState((prevState) => ({
+          ...prevState,
+          sourceDataList: response.data,
+        }));
+      }
+    });
+  };
+
+  const getSourceColumns = () => {
+    const columns = [
+      {
+        title: "Source",
+        dataIndex: "source",
+        key: "source",
+        width: 60,
+        ellipsis: true,
+        showSorterTooltip: false,
+      },
+      {
+        title: "Status",
+        width: 60,
+        render: (text, record) => (
+          <>
+            <SourceGridChart
+              allowSelect={true}
+              onChartClick={(params) => changeStatus(params)}
+              record={record}
+            />
+          </>
+        ),
+      },
+    ];
+    return columns;
+  };
+
+  const showMemberDrawer = (id) => {
+    setMemberIDState(id);
+    setVisible(true);
+  };
+
+  const onClose = () => {
+    clearMemberIDState();
+    setVisible(false);
+  };
+
+  const getMemberDetails = (params, excelParams) => {
+    const hcc = _filterData.HCC_ValueCount.split("/");
+    const confidence = _filterData.Confidence_ValueCount.split("/");
+    setVisibleDownload(true);
+    let excelFilters = [];
+    if (source !== null) {
+      excelFilters.push({
+        ParameterName: "Source",
+        ParameterValue: excelParams.sourceCategory,
+        ParameterText: excelParams.sourceCategory,
+        Caption: "Source",
+        IsAllowToShow: true,
+      });
+    }
+    if (sourceHcc !== null) {
+      excelFilters.push({
+        ParameterName: "HCC",
+        ParameterValue: excelParams.hcc,
+        ParameterText: titleCoverage + " HCC " + sourceHcc,
+        Caption: "HCC",
+        IsAllowToShow: true,
+        Count: "1/" + hcc[1],
+      });
+    }
+    if (opportunityStatus !== null) {
+      excelFilters.push({
+        ParameterName: "Status",
+        ParameterValue: excelParams.status,
+        ParameterText: excelParams.status === "1" ? "Open" : "Close",
+        Caption: "Status",
+        IsAllowToShow: true,
+        Count: "1/" + confidence[1],
+      });
+    }
+    setByMemberLoading(true);
+    opportunityDashboardService.getMemberDetails(params).then((response) => {
+      setByMemberLoading(false);
+      if (statusCode(response, NOTIFICATION_TITLE.OPPORTUNITY_STATUS)) return;
+      if (response.statusCode === ENUM_HTTPSTATUSCODE.OK) {
+        setListState((prevState) => ({
+          ...prevState,
+          memberDataList: response.data,
+        }));
+        setFiltersForExcel(excelFilters);
+        if (response.data.length !== 0) {
+          setVisibleDownload(false);
+        }
+      }
+    });
+  };
+
+  const getMemberColumns = () => {
+    const columns = [
+      {
+        title: "Member ID",
+        dataIndex: "memberId",
+        key: "memberId",
+        width: 30,
+        ellipsis: true,
+        showSorterTooltip: false,
+        render: (text, record) => (
+          <Button
+            title={text}
+            type="text"
+            className="p-0"
+            size="small"
+            variant="themelink"
+            onClick={() => {
+              showMemberDrawer(text);
+            }}
+          >
+            {text}
+          </Button>
+        ),
+      },
+      {
+        title: "HCC",
+        dataIndex: "hCC",
+        key: "hCC",
+        width: 20,
+        ellipsis: true,
+        showSorterTooltip: false,
+        render: (text, record) => <> {text}</>,
+      },
+      {
+        title: "HCC Description",
+        dataIndex: "hCCDescription",
+        key: "hCCDescription",
+        width: 35,
+        ellipsis: true,
+        showSorterTooltip: false,
+      },
+      {
+        title: "Status",
+        dataIndex: "status",
+        key: "status",
+        width: 20,
+        ellipsis: true,
+        showSorterTooltip: false,
+      },
+      {
+        title: "Confidence Level",
+        dataIndex: "confidence_level",
+        key: "confidence_level",
+        width: 35,
+        ellipsis: true,
+        showSorterTooltip: false,
+        render: (text, record) =>
+          record.confidence_level === "Very High" ? (
+            <Tag className="tag-very-high bg-color text-white">{text}</Tag>
+          ) : record.confidence_level === "Medium" ? (
+            <Tag className="tag-medium bg-color">{text}</Tag>
+          ) : record.confidence_level === "High" ? (
+            <Tag className="tag-high bg-color text-white">{text}</Tag>
+          ) : record.confidence_level === "Low" ? (
+            <Tag className="tag-low bg-color">{text}</Tag>
+          ) : (
+            <>{text}</>
+          ),
+      },
+      {
+        title: "Adjusted Risk Score",
+        dataIndex: "weighted_Risk_Score_Impact",
+        key: "weighted_Risk_Score_Impact",
+        width: 50,
+        align: "center",
+        ellipsis: true,
+        showSorterTooltip: false,
+      },
+    ];
+    return columns;
+  };
+
+  const setLocalAndRedirect = () => {
+    let params = {
+      ServiceYear: _filterData.Year,
+      LOB: _filterData.LOB,
+      Coverage: _filterData.CoverageID,
+      HCC:
+        sourceHcc === null
+          ? _filterData.HCC.split(",")
+          : [sourceHcc + "|" + _filterData.CoverageID],
+      Confidence: _filterData.Confidence.split(","),
+      OpportunityStatus:
+        opportunityStatus === null
+          ? _filterData.Status.split(",")
+          : [opportunityStatus],
+    };
+    localStorage.setItem("requestParams", JSON.stringify(params));
+    window.open(Paths.CoreReportOpportunity, "_blank");
+  };
+
+  return (
+    <section className="m-3">
+      {memberID ? (
+        <MemberDrawer memberID={memberID} visible={visible} onClose={onClose} />
+      ) : null}
+      <Row
+        style={{
+          backgroundColor: "white",
+          padding: "20px 20px 0px 20px",
+          margin: "-15px -15px 0px",
+          boxShadow: "0px 5px 15px -15px #111",
+        }}
+      >
+        <Col flex="auto">
+          <AddFilterButton {...props} />
+        </Col>
+        <Col flex="none">
+          <ExportToPDF
+            rootElementId="dashboardContent"
+            downloadFileName="OpportunityStatusReport"
+            pdfTitle="Opportunity Status"
+          />
+        </Col>
+      </Row>
+      <div id="dashboardContent">
+        <Row gutter={[16, 16]} className="mt-3">
+          <Col sm={24} md={24} lg={12} xl={12}>
+            <Card className="box-shadow box-flex" size="small">
+              <h5 className="font-14 m-0 py-2">Chronic Recapture Rate</h5>
+              {recaptureRateLoading ? (
+                <div className="py-4">
+                  <ChildLoading />
+                </div>
+              ) : (
+                <>
+                  <h5 className=" color-gray">
+                    {recaptureWidgetData.chronicRecaptureRate == null
+                      ? "-"
+                      : recaptureWidgetData.chronicRecaptureRate.toLocaleString(
+                          "en-US",
+                          { maximumFractionDigits: 0 }
+                        )}
+                    %
+                  </h5>
+                  <br />
+                  <LineBarChart {...recaptureChartProps} />
+                </>
+              )}
+              <div class="legends mt-3">
+                <div class="legend-box">
+                  <span class="bg-forest"></span>
+                  <span class="legend-value">Recaptured</span>
+                </div>
+                <div class="legend-box">
+                  <span class="bg-grey"></span>
+                  <span class="legend-value">Not Recaptured</span>
+                </div>
+              </div>
+            </Card>
+          </Col>
+          <Col sm={24} md={24} lg={12} xl={12}>
+            <Card className="box-shadow box-flex" size="small">
+              <h5 className="font-14 m-0 py-2">Members</h5>
+              {membersLoading ? (
+                <div className="py-4">
+                  <ChildLoading />
+                </div>
+              ) : (
+                <>
+                  <h5 className=" color-gray">
+                    {memberWidgetData.members == null
+                      ? "-"
+                      : memberWidgetData.members}
+                  </h5>
+                  <br />
+                  <LineBarChart {...memberChartProps} />
+                </>
+              )}
+              <div class="legends mt-3">
+                <div class="legend-box">
+                  <span class="bg-green"></span>
+                  <span class="legend-value">With Opportunities</span>
+                </div>
+                <div class="legend-box">
+                  <span class="bg-sand"></span>
+                  <span class="legend-value">Without Opportunities</span>
+                </div>
+              </div>
+            </Card>
+          </Col>
+        </Row>
+        <Row gutter={[16, 16]} className="mt-3">
+          <Col sm={24} md={24} lg={24} xl={24}>
+            <Card
+              bodyStyle={{ padding: "0" }}
+              headStyle={{
+                padding: "0px 0px 15px 12px",
+                marginBottom: ".1rem",
+              }}
+              className="box-shadow box-flex"
+              size="small"
+              title={<div className="mt-2">Top HCCs</div>}
+              extra={
+                <Tabs
+                  items={tabItems}
+                  className="mr-4"
+                  onChange={tabChangeHanlder}
+                  tabBarStyle={{ background: "transparent" }}
+                />
+              }
+            >
+              <Table
+                style={{ padding: 0, margin: 0 }}
+                key="hcc_table"
+                rowKey="hcc"
+                locale={{
+                  emptyText: topHccLoading ? (
+                    <div className="py-4">
+                      <ChildLoading />
+                    </div>
+                  ) : (
+                    ""
+                  ),
+                }}
+                dataSource={listState.hccDataList}
+                columns={getColumns()}
+                scroll={{ x: 1200, y: 350 }}
+                className="header-style"
+                pagination={false}
+              />
+            </Card>
+          </Col>
+        </Row>
+        <Row gutter={[16, 16]} className="mt-3">
+          <Col sm={24} md={24} lg={24} xl={8}>
+            <Card
+              bodyStyle={{ padding: "0" }}
+              className="box-shadow box-flex"
+              title="Source"
+              size="small"
+              extra={
+                <>
+                  <hr />
+                </>
+              }
+            >
+              <Table
+                style={{ padding: 0, margin: 0 }}
+                key="source_details"
+                rowKey="source"
+                locale={{
+                  emptyText: bySourceLoading ? (
+                    <div className="py-4">
+                      <ChildLoading />
+                    </div>
+                  ) : (
+                    ""
+                  ),
+                }}
+                dataSource={listState.sourceDataList}
+                columns={getSourceColumns()}
+                scroll={{}}
+                className="header-style"
+                pagination={false}
+              />
+            </Card>
+          </Col>
+          <Col sm={24} md={24} lg={24} xl={16}>
+            <Card
+              bodyStyle={{ padding: "0" }}
+              extra={
+                <Space>
+                  <ExportExcel
+                    {...props}
+                    sorting={{ sortOrder: "", sortColumn: "" }}
+                    displayIconOnly={true}
+                  />
+                  {showReportButton && (
+                    <Button
+                      type="button"
+                      variant="themebutton"
+                      className="d-flex align-items-center"
+                      onClick={setLocalAndRedirect}
+                    >
+                      Go to Report
+                    </Button>
+                  )}
+                </Space>
+              }
+              className="box-shadow box-flex"
+              title="Member"
+              size="small"
+            >
+              <Table
+                style={{ padding: 0, margin: 0 }}
+                key="opportunityStatus_GUID"
+                rowKey="opportunityStatus_GUID"
+                locale={{
+                  emptyText: byMemberLoading ? (
+                    <div className="py-4">
+                      <ChildLoading />
+                    </div>
+                  ) : (
+                    ""
+                  ),
+                }}
+                dataSource={listState.memberDataList}
+                columns={getMemberColumns()}
+                scroll={{ scrollToFirstRowOnChange: true, x: 720, y: 150 }}
+                className="header-style"
+                pagination={false}
+              />
+            </Card>
+          </Col>
+        </Row>
+      </div>
+    </section>
+  );
+}
+export default GridAttributeHOC(OpportunityStatus);
